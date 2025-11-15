@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stddef.h>
+#include "common.h"  // 共通ヘッダ追加
 
 #define UART_BASE 0x10000000 // UARTのベースアドレス QEMUのvirt machineでは0x10000000だよ
 #define UART_THR  (UART_BASE + 0)  // Transmit Holding Register 送信データレジスタ
@@ -44,6 +45,47 @@ void printf(const char *fmt, ...) {
     uart_puts(fmt);
 }
 
+// トラップハンドラ: Sモードからのトラップ処理
+void trap_handler(void) {
+    uint64_t scause, stval, sepc;
+    
+    // CSRから原因と値を取得
+    asm volatile (
+        "csrr %0, scause\n"
+        "csrr %1, stval\n"
+        "csrr %2, sepc\n"
+        : "=r"(scause), "=r"(stval), "=r"(sepc)
+    );
+    
+    if (scause == TRAP_CAUSE_ENV_CALL_SMODE) {
+        // ecall from S-mode: 簡単なシステムコール扱い（今はテスト）
+        printf("Trap: ecall from S-mode detected! (a0 = %x)\n", a0);  // a0を引数として表示（暫定）
+        
+        // sepcを+4してecall命令をスキップ（復帰時次へ）
+        sepc += 4;
+        asm volatile("csrw sepc, %0" : : "r"(sepc));
+        
+        // ここで本格的なシステムコール処理を追加予定
+    } else if (scause == TRAP_CAUSE_ILLEGAL_INSTR) {
+        printf("Trap: Illegal instruction at 0x%x (stval=0x%x)\n", sepc, stval);
+        // エラー処理: ハルト
+        while(1) asm volatile("wfi");
+    } else {
+        printf("Unknown trap: scause=0x%x, stval=0x%x\n", scause, stval);
+        while(1) asm volatile("wfi");
+    }
+    
+    // ユーザモード復帰フラグを設定（SPIE=1で中断有効、SPP=0でUモード復帰）
+    uint64_t sstatus;
+    asm volatile("csrr %0, sstatus" : "=r"(sstatus));
+    sstatus |= SSTATUS_SPIE;  // 中断有効
+    sstatus &= ~SSTATUS_SPP;  // Uモードへ（ただし今はSモードテスト）
+    asm volatile("csrw sstatus, %0" : : "r"(sstatus));
+    
+    // sretで復帰
+    asm volatile("sret");
+}
+
 // カーネルのエントリポイント、start.Sから呼び出されるよ
 void kmain(uint64_t hartid, void *dtb) {
     uart_init();
@@ -66,7 +108,11 @@ void kmain(uint64_t hartid, void *dtb) {
     }
     printf("\n");
     
-    printf("System halted.\n");
+    // テスト: ecallでトラップ誘発
+    printf("Testing trap handler with ecall...\n");
+    asm volatile("ecall");  // Sモードからecall: トラップ発生
+    
+    printf("System halted.\n");  // ここには到達しないはず
     
     // 無限ループ
     while (1) {
