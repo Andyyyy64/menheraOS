@@ -39,11 +39,13 @@ int strcmp(const char *s1, const char *s2) {
     return *(const uint8_t *)s1 - *(const uint8_t *)s2;
 }
 
-// va_listサポートのためのマクロ
-typedef uint64_t *va_list;
-#define va_start(ap, last) (void)((ap) = ((uint64_t *)&(last) + 1))
-#define va_arg(ap, type) ((type)(*(ap)++))
-#define va_end(ap) ((void)0)
+char *strcpy(char *dst, const char *src) {
+    char *d = dst;
+    while (*src)
+        *d++ = *src++;
+    *d = '\0';
+    return dst;
+}
 
 // 簡易printf関数
 void printf(const char *fmt, ...) {

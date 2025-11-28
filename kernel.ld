@@ -45,6 +45,11 @@ SECTIONS {
     
     /* カーネル終了位置 */
     __kernel_end = .;
+
+    . = ALIGN(4096);
+    __free_ram = .;
+    . += 64 * 1024 * 1024; /* 64MB */
+    __free_ram_end = .;
     
     /* デバッグ情報（メモリには配置しない） */
     .debug_info 0 : { *(.debug_info) }

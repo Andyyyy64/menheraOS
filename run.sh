@@ -11,7 +11,8 @@ BUILD_DIR="build"
 DISK_DIR="disk"
 
 CFLAGS="-Wall -Wextra -O2 -g -ffreestanding -fno-common -nostdlib -mno-relax"
-CFLAGS="$CFLAGS -march=rv64gc -mabi=lp64d -mcmodel=medany"
+CFLAGS="$CFLAGS -march=rv64gc -mabi=lp64d -mcmodel=medany -Iinclude"
+LDFLAGS="-nostdlib -Wl,--gc-sections"
 LDFLAGS="-nostdlib -Wl,--gc-sections"
 
 mkdir -p "$BUILD_DIR"
@@ -24,8 +25,11 @@ $CC $CFLAGS -c start.S -o "$BUILD_DIR/start.o"
 echo "  Compiling kernel.c..."
 $CC $CFLAGS -c kernel.c -o "$BUILD_DIR/kernel.o"
 
+echo "  Compiling common.c..."
+$CC $CFLAGS -c common.c -o "$BUILD_DIR/common.o"
+
 echo "  Linking kernel..."
-$CC $LDFLAGS -T kernel.ld "$BUILD_DIR/start.o" "$BUILD_DIR/kernel.o" -o "$BUILD_DIR/kernel.elf"
+$CC $LDFLAGS -T kernel.ld "$BUILD_DIR/start.o" "$BUILD_DIR/kernel.o" "$BUILD_DIR/common.o" -o "$BUILD_DIR/kernel.elf"
 
 echo "  Generating disassembly..."
 $OBJDUMP -d "$BUILD_DIR/kernel.elf" > "$BUILD_DIR/kernel.dis"
