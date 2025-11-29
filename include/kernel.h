@@ -13,23 +13,17 @@
 #define SYS_EXIT 3
 #define SYS_YIELD 4
 
-// プロセス状態
-typedef enum {
-    PROC_STATE_READY,
-    PROC_STATE_RUNNING,
-    PROC_STATE_SLEEPING,
-    PROC_STATE_ZOMBIE
-} proc_state_t;
+#define PROCS_MAX 8       // 最大プロセス数
 
-// プロセス構造体 (将来の拡張用)
-typedef struct process {
-    int pid;
-    proc_state_t state;
-    uint64_t context[32];  // レジスタコンテキスト (簡易)
-    uint64_t *page_table;  // ページテーブルルート
-    uint64_t stack_base;   // スタックベース
-    uint64_t stack_size;
-} process_t;
+#define PROC_UNUSED   0   // 未使用のプロセス管理構造体
+#define PROC_RUNNABLE 1   // 実行可能なプロセス
+
+struct process {
+    int pid;             // プロセスID
+    int state;           // プロセスの状態: PROC_UNUSED または PROC_RUNNABLE
+    vaddr_t sp;          // コンテキストスイッチ時のスタックポインタ
+    uint8_t stack[8192]; // カーネルスタック
+};
 
 // ページテーブルエントリ構造体 (Sv39)
 typedef union pte {

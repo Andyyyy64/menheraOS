@@ -4,6 +4,10 @@
 extern char __bss_start[], __bss_end[], __stack_top[];
 extern char __free_ram[], __free_ram_end[];
 
+struct process procs[PROCS_MAX];
+struct process *current_proc; // 現在実行中のプロセス
+struct process *idle_proc;    // アイドルプロセス
+
 struct sbiret sbi_call(long arg0, long arg1, long arg2, long arg3, long arg4,
                        long arg5, long fid, long eid) {
     register long a0 __asm__("a0") = arg0;
@@ -125,21 +129,152 @@ void kernel_entry(void) {
     );
 }
 
+__attribute__((naked)) void switch_context(uint64_t *prev_sp,
+                                           uint64_t *next_sp) {
+    __asm__ __volatile__(
+        // 実行中プロセスのスタックへレジスタを保存
+        "addi sp, sp, -13 * 8\n"
+        "sd ra,  0  * 8(sp)\n"
+        "sd s0,  1  * 8(sp)\n"
+        "sd s1,  2  * 8(sp)\n"
+        "sd s2,  3  * 8(sp)\n"
+        "sd s3,  4  * 8(sp)\n"
+        "sd s4,  5  * 8(sp)\n"
+        "sd s5,  6  * 8(sp)\n"
+        "sd s6,  7  * 8(sp)\n"
+        "sd s7,  8  * 8(sp)\n"
+        "sd s8,  9  * 8(sp)\n"
+        "sd s9,  10 * 8(sp)\n"
+        "sd s10, 11 * 8(sp)\n"
+        "sd s11, 12 * 8(sp)\n"
+
+        // スタックポインタの切り替え
+        "sd sp, (a0)\n"
+        "ld sp, (a1)\n"
+
+        // 次のプロセスのスタックからレジスタを復元
+        "ld ra,  0  * 8(sp)\n"
+        "ld s0,  1  * 8(sp)\n"
+        "ld s1,  2  * 8(sp)\n"
+        "ld s2,  3  * 8(sp)\n"
+        "ld s3,  4  * 8(sp)\n"
+        "ld s4,  5  * 8(sp)\n"
+        "ld s5,  6  * 8(sp)\n"
+        "ld s6,  7  * 8(sp)\n"
+        "ld s7,  8  * 8(sp)\n"
+        "ld s8,  9  * 8(sp)\n"
+        "ld s9,  10 * 8(sp)\n"
+        "ld s10, 11 * 8(sp)\n"
+        "ld s11, 12 * 8(sp)\n"
+        "addi sp, sp, 13 * 8\n"
+        "ret\n"
+    );
+}
+
+struct process *create_process(uint64_t pc) {
+    // 空いているプロセス管理構造体を探す
+    struct process *proc = NULL;
+    int i;
+    for (i = 0; i < PROCS_MAX; i++) {
+        if (procs[i].state == PROC_UNUSED) {
+            proc = &procs[i];
+            break;
+        }
+    }
+
+    if (!proc)
+        PANIC("no free process slots");
+
+    // switch_context() で復帰できるように、スタックに呼び出し先保存レジスタを積む
+    uint64_t *sp = (uint64_t *) &proc->stack[sizeof(proc->stack)];
+    *--sp = 0;                      // s11
+    *--sp = 0;                      // s10
+    *--sp = 0;                      // s9
+    *--sp = 0;                      // s8
+    *--sp = 0;                      // s7
+    *--sp = 0;                      // s6
+    *--sp = 0;                      // s5
+    *--sp = 0;                      // s4
+    *--sp = 0;                      // s3
+    *--sp = 0;                      // s2
+    *--sp = 0;                      // s1
+    *--sp = 0;                      // s0
+    *--sp = (uint64_t) pc;          // ra
+
+    // 各フィールドを初期化
+    proc->pid = i + 1;
+    proc->state = PROC_RUNNABLE;
+    proc->sp = (uint64_t) sp;
+    return proc;
+}
+
+void yield(void) {
+    // 実行可能なプロセスを探す
+    struct process *next = idle_proc;
+    for (int i = 0; i < PROCS_MAX; i++) {
+        struct process *proc = &procs[(current_proc->pid + i) % PROCS_MAX];
+        if (proc->state == PROC_RUNNABLE && proc->pid > 0) {
+            next = proc;
+            break;
+        }
+    }
+
+    // 現在実行中のプロセス以外に、実行可能なプロセスがない。戻って処理を続行する
+    if (next == current_proc)
+        return;
+
+    // カーネルスタックの切り替え (例外ハンドラ用)
+    __asm__ __volatile__(
+        "csrw sscratch, %[sscratch]\n"
+        :
+        : [sscratch] "r" ((uint64_t) &next->stack[sizeof(next->stack)])
+    );
+
+    // コンテキストスイッチ
+    struct process *prev = current_proc;
+    current_proc = next;
+    switch_context(&prev->sp, &next->sp);
+}
+
+void delay(void) {
+    for (int i = 0; i < 30000000; i++)
+        __asm__ __volatile__("nop"); // 何もしない命令
+}
+
+struct process *proc_a;
+struct process *proc_b;
+
+void proc_a_entry(void) {
+    printf("starting process A\n");
+    while (1) {
+        putchar('A');
+        yield();
+        delay();
+    }
+}
+
+void proc_b_entry(void) {
+    printf("starting process B\n");
+    while (1) {
+        putchar('B');
+        yield();
+        delay();
+    }
+}
+
 void kmain(void) {
     // start.S でBSSクリア済みだが、念のため
     memset(__bss_start, 0, (size_t) __bss_end - (size_t) __bss_start);
 
     WRITE_CSR(stvec, (uint64_t) kernel_entry);
 
-    printf("\n\nHello World from S-mode! (SBI)\n");
+    idle_proc = create_process((uint64_t) NULL);
+    idle_proc->pid = 0; // idle
+    current_proc = idle_proc;
 
-    paddr_t paddr0 = alloc_pages(2);
-    paddr_t paddr1 = alloc_pages(1);
-    printf("alloc_pages test: paddr0=%x\n", paddr0);
-    printf("alloc_pages test: paddr1=%x\n", paddr1);
+    proc_a = create_process((uint64_t) proc_a_entry);
+    proc_b = create_process((uint64_t) proc_b_entry);
 
-    // 例外テスト (uncomment to test)
-    // __asm__ __volatile__("unimp");
-
-    PANIC("booted!");
+    yield();
+    PANIC("switched to idle process");
 }
