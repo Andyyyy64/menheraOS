@@ -26,21 +26,15 @@ struct process {
 };
 
 // ページテーブルエントリ構造体 (Sv39)
-typedef union pte {
-    uint64_t bits;
-    struct {
-        uint64_t v : 1;    // Valid
-        uint64_t r : 1;    // Read
-        uint64_t w : 1;    // Write
-        uint64_t x : 1;    // Execute
-        uint64_t u : 1;    // User
-        uint64_t g : 1;    // Global
-        uint64_t a : 1;    // Accessed
-        uint64_t d : 1;    // Dirty
-        uint64_t reserved : 44;
-        uint64_t ppn : 26; // Physical Page Number
-    } fields;
-} pte_t;
+#define PTE_V (1 << 0) // Valid
+#define PTE_R (1 << 1) // Read
+#define PTE_W (1 << 2) // Write
+#define PTE_X (1 << 3) // Execute
+#define PTE_U (1 << 4) // User
+#define SATP_SV39 (8ULL << 60)
+#define SATP_MAKE(ppn) (SATP_SV39 | (((uint64_t)ppn) >> 12))
+
+typedef uint64_t pte_t;
 
 // ページテーブル構造体
 typedef pte_t *pagetable_t;  // 512エントリの配列を指すポインタ

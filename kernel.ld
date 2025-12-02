@@ -14,6 +14,7 @@ MEMORY {
 
 SECTIONS {
     . = 0x80200000;
+    __kernel_base = .;
     
     /* テキストセクション（実行可能コード） */
     .text : {

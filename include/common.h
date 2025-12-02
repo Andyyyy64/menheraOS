@@ -38,7 +38,7 @@ typedef uint64_t paddr_t;
 typedef uint64_t vaddr_t;
 
 #define align_up(value, align)   __builtin_align_up(value, align)
-#define is_aligned(value, align) __builtin_is_aligned(value, align)
+#define is_aligned(value, align) (((value) & ((align) - 1)) == 0)
 #define offsetof(type, member)   __builtin_offsetof(type, member)
 
 void *memset(void *buf, int c, size_t n);

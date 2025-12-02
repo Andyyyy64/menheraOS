@@ -3,6 +3,7 @@
 
 extern char __bss_start[], __bss_end[], __stack_top[];
 extern char __free_ram[], __free_ram_end[];
+extern char __kernel_base[]; // kernel.ld で定義が必要 (0x80200000)
 
 struct process procs[PROCS_MAX];
 struct process *current_proc; // 現在実行中のプロセス
@@ -171,6 +172,32 @@ __attribute__((naked)) void switch_context(uint64_t *prev_sp,
     );
 }
 
+void map_page(pagetable_t table, vaddr_t vaddr, paddr_t paddr, uint64_t flags) {
+    if (!is_aligned(vaddr, PAGE_SIZE))
+        PANIC("unaligned vaddr %x", vaddr);
+    if (!is_aligned(paddr, PAGE_SIZE))
+        PANIC("unaligned paddr %x", paddr);
+
+    pte_t *pte = &table[(vaddr >> 30) & 0x1ff]; // Level 2 (1GB)
+    if (!(*pte & PTE_V)) {
+        // 新しいページテーブルを確保して、テーブルを設定する
+        paddr_t pt_paddr = alloc_pages(1);
+        *pte = ((pt_paddr / PAGE_SIZE) << 10) | PTE_V;
+    }
+
+    pagetable_t table1 = (pagetable_t) ((*pte >> 10) * PAGE_SIZE);
+    pte = &table1[(vaddr >> 21) & 0x1ff]; // Level 1 (2MB)
+    if (!(*pte & PTE_V)) {
+        // 新しいページテーブルを確保して、テーブルを設定する
+        paddr_t pt_paddr = alloc_pages(1);
+        *pte = ((pt_paddr / PAGE_SIZE) << 10) | PTE_V;
+    }
+
+    pagetable_t table0 = (pagetable_t) ((*pte >> 10) * PAGE_SIZE);
+    pte = &table0[(vaddr >> 12) & 0x1ff]; // Level 0 (4KB)
+    *pte = ((paddr / PAGE_SIZE) << 10) | flags | PTE_V;
+}
+
 struct process *create_process(uint64_t pc) {
     // 空いているプロセス管理構造体を探す
     struct process *proc = NULL;
@@ -267,6 +294,38 @@ void kmain(void) {
     memset(__bss_start, 0, (size_t) __bss_end - (size_t) __bss_start);
 
     WRITE_CSR(stvec, (uint64_t) kernel_entry);
+
+    // カーネルページテーブルの構築
+    pagetable_t kernel_pagetable = (pagetable_t) alloc_pages(1);
+    
+    // カーネルコード・データ領域をマッピング (0x80200000 ~ __free_ram_end)
+    // 物理アドレス == 仮想アドレス (Identity Mapping)
+    for (uint64_t p = (uint64_t) __kernel_base; p < (uint64_t) __free_ram_end; p += PAGE_SIZE) {
+        map_page(kernel_pagetable, p, p, PTE_R | PTE_W | PTE_X);
+    }
+    
+    // MMIO領域 (VirtIO, UART, PLIC, CLINT) をマッピング
+    // QEMU virt machine のメモリマップに基づく
+    // 0x10000000 (UART)
+    map_page(kernel_pagetable, 0x10000000, 0x10000000, PTE_R | PTE_W);
+    // 0x02000000 (CLINT) - 64KB
+    for (uint64_t p = 0x02000000; p < 0x02000000 + 0x10000; p += PAGE_SIZE) {
+        map_page(kernel_pagetable, p, p, PTE_R | PTE_W);
+    }
+    // 0x0c000000 (PLIC) - 4MB (0x400000)
+    for (uint64_t p = 0x0c000000; p < 0x0c000000 + 0x400000; p += PAGE_SIZE) {
+        map_page(kernel_pagetable, p, p, PTE_R | PTE_W);
+    }
+    // 0x10001000 (VirtIO) - 4KB * 8 (0x8000)
+    for (uint64_t p = 0x10001000; p < 0x10001000 + 0x8000; p += PAGE_SIZE) {
+        map_page(kernel_pagetable, p, p, PTE_R | PTE_W);
+    }
+
+    // ページング有効化 (satp設定)
+    WRITE_CSR(satp, SATP_MAKE((uint64_t)kernel_pagetable));
+    __asm__ __volatile__("sfence.vma");
+
+    printf("\n\nHello World from S-mode! (Paging Enabled)\n");
 
     idle_proc = create_process((uint64_t) NULL);
     idle_proc->pid = 0; // idle
