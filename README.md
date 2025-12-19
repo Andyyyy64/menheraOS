@@ -1,7 +1,6 @@
 ## menheraOS
 
 menheraOS用の最小OS実装。RISC-V（QEMU virt, 64-bit）をターゲットに、C言語とアセンブリで「1000行OS」流儀の構成を参考に実装する。OpenSBI（QEMUの -bios default）を利用し、Sモードからカーネルを開始する。
-仕事の合間にゆっくり楽しくやっていく -> うんこ
 
 参考: [OS in 1,000](https://operating-system-in-1000-lines.vercel.app/ja/)
 
